@@ -66,9 +66,11 @@ st.markdown("""
 # ─────────────────────────────────────────────
 # DATA LOADING — strict CSV sources only
 # ─────────────────────────────────────────────
+import os
+
 @st.cache_data
 def load_all():
-    base = "/mnt/user-data/uploads/"
+    base = os.path.join(os.path.dirname(__file__), "data") + "/"
 
     device   = pd.read_csv(base + "device-1-2024.csv",          encoding="utf-8-sig")
     domain   = pd.read_csv(base + "domain-1-2024.csv",          encoding="utf-8-sig")
