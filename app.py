@@ -18,13 +18,34 @@ except NameError:
     DATA_DIR = pathlib.Path.cwd()
 
 def _find_file(name):
-    """Return the first existing path for `name` (or its .zip equivalent), checking DATA_DIR then cwd."""
-    candidates = [name, pathlib.Path(name).stem + ".zip"]
-    for base in (DATA_DIR, pathlib.Path.cwd(), DATA_DIR / "data", pathlib.Path.cwd() / "data"):
-        for candidate in candidates:
-            p = base / candidate
-            if p.exists():
-                return str(p)
+    """
+    Find `name` (a CSV filename) in the repo. Checks in order:
+    1. The exact CSV file
+    2. A .zip with the same stem as the CSV
+    3. Any .zip in the search directories (picks first one containing a .csv)
+    """
+    import zipfile
+    bases = (DATA_DIR, pathlib.Path.cwd(), DATA_DIR / "data", pathlib.Path.cwd() / "data")
+    for base in bases:
+        # Exact CSV match
+        p = base / name
+        if p.exists():
+            return str(p)
+        # Same-stem zip
+        p = base / (pathlib.Path(name).stem + ".zip")
+        if p.exists():
+            return str(p)
+    # Any zip in any base that contains a CSV
+    for base in bases:
+        if not base.exists():
+            continue
+        for zp in sorted(base.glob("*.zip")):
+            try:
+                with zipfile.ZipFile(zp) as zf:
+                    if any(n.endswith(".csv") for n in zf.namelist()):
+                        return str(zp)
+            except Exception:
+                continue
     return None
 
 st.set_page_config(page_title="USDA Digital Service Dashboard", layout="wide")
