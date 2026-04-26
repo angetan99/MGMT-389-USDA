@@ -18,11 +18,13 @@ except NameError:
     DATA_DIR = pathlib.Path.cwd()
 
 def _find_file(name):
-    """Return the first existing path for `name`, checking DATA_DIR then cwd."""
+    """Return the first existing path for `name` (or its .zip equivalent), checking DATA_DIR then cwd."""
+    candidates = [name, pathlib.Path(name).stem + ".zip"]
     for base in (DATA_DIR, pathlib.Path.cwd(), DATA_DIR / "data", pathlib.Path.cwd() / "data"):
-        p = base / name
-        if p.exists():
-            return str(p)
+        for candidate in candidates:
+            p = base / candidate
+            if p.exists():
+                return str(p)
     return None
 
 st.set_page_config(page_title="USDA Digital Service Dashboard", layout="wide")
@@ -77,11 +79,26 @@ def load_system_data():
 
 @st.cache_data
 def load_rd_data(file_source):
-    """file_source is either a file path string or an UploadedFile object."""
+    """file_source is a file path string (csv or zip) or an UploadedFile object."""
+    import zipfile, io
     if isinstance(file_source, str):
-        raw = pd.read_csv(file_source, header=None, low_memory=False)
+        if file_source.endswith(".zip"):
+            with zipfile.ZipFile(file_source) as zf:
+                csv_name = next(n for n in zf.namelist() if n.endswith(".csv"))
+                with zf.open(csv_name) as f:
+                    raw = pd.read_csv(f, header=None, low_memory=False)
+        else:
+            raw = pd.read_csv(file_source, header=None, low_memory=False)
     else:
-        raw = pd.read_csv(file_source, header=None, low_memory=False)
+        # UploadedFile — check if it's a zip by filename
+        if file_source.name.endswith(".zip"):
+            with zipfile.ZipFile(io.BytesIO(file_source.read())) as zf:
+                csv_name = next(n for n in zf.namelist() if n.endswith(".csv"))
+                with zf.open(csv_name) as f:
+                    raw = pd.read_csv(f, header=None, low_memory=False)
+            file_source.seek(0)
+        else:
+            raw = pd.read_csv(file_source, header=None, low_memory=False)
 
     # Step 1: skip first 6 metadata rows (rows 0-5); headers at rows 6-7
     h1 = list(raw.iloc[6])
@@ -270,8 +287,8 @@ rd_default_path = _find_file(RD_FILENAME)
 
 rd_file = st.sidebar.file_uploader(
     "Override Rural Development CSV (optional)",
-    type=["csv"],
-    help="Only needed if the bundled file is not in the repository. Leave empty to use the file committed to the repo."
+    type=["csv", "zip"],
+    help="Only needed if the bundled file is not in the repository. Accepts .csv or a .zip containing the CSV."
 )
 
 if rd_file is not None:
