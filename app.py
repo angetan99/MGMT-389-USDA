@@ -1,4 +1,5 @@
 import os
+import pathlib
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -9,7 +10,20 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
 
-DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+# Resolve DATA_DIR: try the directory containing this file, then cwd.
+# Both work locally and on Streamlit Cloud as long as CSVs live next to app.py.
+try:
+    DATA_DIR = pathlib.Path(__file__).parent.resolve()
+except NameError:
+    DATA_DIR = pathlib.Path.cwd()
+
+def _find_file(name):
+    """Return the first existing path for `name`, checking DATA_DIR then cwd."""
+    for base in (DATA_DIR, pathlib.Path.cwd(), DATA_DIR / "data", pathlib.Path.cwd() / "data"):
+        p = base / name
+        if p.exists():
+            return str(p)
+    return None
 
 st.set_page_config(page_title="USDA Digital Service Dashboard", layout="wide")
 
@@ -26,7 +40,10 @@ AGENCY_MAP = {
 @st.cache_data
 def load_system_data():
     def p(name):
-        return os.path.join(DATA_DIR, name)
+        path = _find_file(name)
+        if path is None:
+            raise FileNotFoundError(f"Cannot find '{name}'. Make sure all CSV files are committed to the repository alongside app.py.")
+        return path
 
     device = pd.read_csv(p("device-1-2024.csv"))
     device["date"] = pd.to_datetime(device["date"])
@@ -248,25 +265,27 @@ def load_rd_data(file_source):
 st.sidebar.title("USDA Digital Dashboard")
 st.sidebar.markdown("---")
 
-rd_default_path = os.path.join(DATA_DIR, "(Rural Development) Edited USDA data base.csv")
-rd_file = st.sidebar.file_uploader(
-    "Upload Rural Development CSV (Layers 2–4)",
-    type=["csv"],
-    help="Upload the 'Edited USDA data base' CSV exported from GA4."
-)
+RD_FILENAME = "(Rural Development) Edited USDA data base.csv"
+rd_default_path = _find_file(RD_FILENAME)
 
-use_default = os.path.exists(rd_default_path)
+rd_file = st.sidebar.file_uploader(
+    "Override Rural Development CSV (optional)",
+    type=["csv"],
+    help="Only needed if the bundled file is not in the repository. Leave empty to use the file committed to the repo."
+)
 
 if rd_file is not None:
     rd_source = rd_file
     rd_available = True
-elif use_default:
+    st.sidebar.success("Using uploaded file.")
+elif rd_default_path is not None:
     rd_source = rd_default_path
     rd_available = True
-    st.sidebar.info("Using default RD data file found in app directory.")
+    st.sidebar.info("RD data loaded from repository.")
 else:
     rd_source = None
     rd_available = False
+    st.sidebar.error(f"'{RD_FILENAME}' not found in the repository. Please upload it above.")
 
 tabs = st.tabs([
     "Layer 1 · System-Wide Analysis",
@@ -405,7 +424,9 @@ with tabs[0]:
                         return "background-color: #ffc7ce; color: #9c0006"
                 return ""
 
-            styled = pivot.style.applymap(highlight_change, subset=["% Change"]).format(
+            # .map() replaces deprecated .applymap() in pandas ≥ 2.2
+            _styler_map = getattr(pivot.style, "map", None) or getattr(pivot.style, "applymap")
+            styled = _styler_map(highlight_change, subset=["% Change"]).format(
                 {c: "{:,.0f}" for c in pivot.columns if c != "% Change"} | {"% Change": "{:.1f}%"}
             )
             st.markdown("**Month-over-Month Momentum (Jan → Jun)**")
