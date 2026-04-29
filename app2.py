@@ -645,17 +645,15 @@ if page == PAGES[1]:
                                      font=dict(size=9, color="black")))
 
             # Transpose: metrics on y-axis (5 rows), sections spread across x-axis
-            # Rendered as raw HTML so the container can scroll horizontally
-            n_sections  = len(hm_data)
-            cell_width  = 80    # px per section column
-            L           = 220   # left margin: colorbar (~55px) + gap + metric labels (~140px)
-            R           = 10    # right margin — kept tight to avoid blank scroll space
-            chart_width = L + n_sections * cell_width + R
+            # Rendered as raw HTML so the container can scroll horizontally.
+            # The colorbar is a static HTML/CSS gradient placed OUTSIDE the Plotly
+            # figure so it never overlaps the chart and never scrolls away.
+            n_sections   = len(hm_data)
+            cell_width   = 80    # px per section column
+            L            = 160   # left margin: just enough for metric labels
+            R            = 10    # right margin — kept tight
+            chart_width  = L + n_sections * cell_width + R
             chart_height = 320
-
-            # colorbar x in paper coords = how far left of the plot domain (0) it sits
-            # with margin L out of total width, the plot domain starts at L/chart_width
-            cb_x = -(R + 10) / chart_width  # small negative offset just outside left edge
 
             fig_hm = go.Figure(go.Heatmap(
                 z=norm.values.T,          # shape (5 metrics, n_sections)
@@ -663,17 +661,7 @@ if page == PAGES[1]:
                 y=HM_METRICS,             # metrics on y-axis
                 colorscale="RdYlGn",
                 zmin=0, zmax=1,
-                showscale=True,
-                colorbar=dict(
-                    title=dict(text="Performance", side="right"),
-                    tickvals=[0, 0.5, 1],
-                    ticktext=["Poor", "Avg", "Good"],
-                    len=0.75,
-                    thickness=14,
-                    x=cb_x,
-                    xanchor="right",
-                    ticks="outside",
-                ),
+                showscale=False,          # legend handled by CSS gradient outside
             ))
             # Cell value annotations — transposed indices
             t_anns = []
@@ -699,15 +687,35 @@ if page == PAGES[1]:
                 annotations=t_anns,
             )
 
-            # Wrap in a scrollable div so it scrolls horizontally on screen
             chart_html = pio.to_html(fig_hm, full_html=False, include_plotlyjs="cdn",
                                      config={"displayModeBar": False})
+
+            # Static CSS gradient legend (left) + scrollable chart (right)
+            legend_bar_h = 180   # px — gradient bar height
             scroll_html = f"""
-            <div style="overflow-x:auto; width:100%; border:1px solid #e0e0e0;
-                        border-radius:6px; padding:4px;">
-                {chart_html}
+            <div style="display:flex; align-items:flex-start; gap:6px;">
+                <!-- Fixed performance legend — never scrolls -->
+                <div style="min-width:52px; flex-shrink:0; display:flex;
+                            flex-direction:column; align-items:center;
+                            padding-top:24px; font-family:sans-serif;">
+                    <span style="font-size:11px; font-weight:600; color:#333;">Good</span>
+                    <div style="width:16px; height:{legend_bar_h}px;
+                                background:linear-gradient(to bottom,
+                                    #1a9850, #91cf60, #ffffbf, #fc8d59, #d73027);
+                                border-radius:3px; margin:4px 0;"></div>
+                    <span style="font-size:11px; font-weight:600; color:#333;">Poor</span>
+                    <div style="font-size:10px; color:#666; margin-top:6px;
+                                text-align:center; line-height:1.3;">
+                        Perf-<br>orm-<br>ance
+                    </div>
+                </div>
+                <!-- Scrollable heatmap -->
+                <div style="overflow-x:auto; flex:1;
+                            border:1px solid #e0e0e0; border-radius:6px; padding:2px;">
+                    {chart_html}
+                </div>
             </div>"""
-            components.html(scroll_html, height=chart_height + 20, scrolling=False)
+            components.html(scroll_html, height=chart_height + 24, scrolling=False)
             st.caption(
                 "Scroll horizontally to see all sections. "
                 "Green = strong performance; red = areas of concern. "
