@@ -3,10 +3,12 @@ import pathlib
 import io
 import zipfile
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
+import plotly.io as pio
 from plotly.subplots import make_subplots
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
@@ -303,67 +305,28 @@ if rd_default:
 else:
     rd_source, rd_ok = None, False
 
-# ── Sidebar: AI Analyst only ───────────────────────────────────────────────────
-st.sidebar.title("💬 AI Analyst")
+# ── Sidebar: hidden (no content) ──────────────────────────────────────────────
+st.sidebar.markdown(
+    "<style>section[data-testid='stSidebar']{display:none}</style>",
+    unsafe_allow_html=True,
+)
 
-if not OPENAI_AVAILABLE:
-    st.sidebar.warning("Install `openai` to enable AI chat.")
-else:
-    oai_key  = st.sidebar.text_input("OpenAI API Key", type="password", key="oai_key")
-    asst_id  = st.sidebar.text_input(
-        "Assistant ID (optional)", key="oai_asst",
-        placeholder="asst_…  leave blank to use GPT-4o",
-    )
-
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    # Render chat history
-    chat_box = st.sidebar.container()
-    with chat_box:
-        for m in st.session_state.messages:
-            prefix = "**You:** " if m["role"] == "user" else "**AI:** "
-            st.sidebar.markdown(prefix + m["content"])
-
-    user_q = st.sidebar.text_input("Ask a question…", key="chat_q", label_visibility="collapsed",
-                                    placeholder="Ask about the data…")
-    send   = st.sidebar.button("Send", use_container_width=True)
-    if st.sidebar.button("Clear chat", use_container_width=True):
-        st.session_state.messages = []
-        st.rerun()
-
-    if send and user_q.strip() and oai_key:
-        st.session_state.messages.append({"role": "user", "content": user_q.strip()})
-        try:
-            client = OpenAI(api_key=oai_key)
-            if asst_id.strip():
-                thread = client.beta.threads.create()
-                client.beta.threads.messages.create(
-                    thread_id=thread.id, role="user", content=user_q.strip()
-                )
-                run = client.beta.threads.runs.create_and_poll(
-                    thread_id=thread.id, assistant_id=asst_id.strip()
-                )
-                msgs = client.beta.threads.messages.list(thread_id=thread.id)
-                reply = msgs.data[0].content[0].text.value
-            else:
-                api_msgs = [{"role": "system", "content": build_system_prompt()}]
-                api_msgs += [{"role": m["role"], "content": m["content"]}
-                             for m in st.session_state.messages]
-                resp  = client.chat.completions.create(model="gpt-4o", messages=api_msgs)
-                reply = resp.choices[0].message.content
-            st.session_state.messages.append({"role": "assistant", "content": reply})
-        except Exception as e:
-            st.session_state.messages.append({"role": "assistant", "content": f"Error: {e}"})
-        st.rerun()
+# Session state for chat
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "oai_key" not in st.session_state:
+    st.session_state.oai_key = ""
+if "asst_id" not in st.session_state:
+    st.session_state.asst_id = ""
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Tabs
 # ══════════════════════════════════════════════════════════════════════════════
-tab1, tab2, tab3 = st.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     "Layer 1 · System-Wide Analysis",
     "Layer 2 · Rural Development Baseline",
     "Layer 3 · Clustering & Underserved Analysis",
+    "💬 AI Analyst",
 ])
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -695,25 +658,56 @@ with tab2:
                     anns.append(dict(x=j, y=i, text=txt, showarrow=False,
                                      font=dict(size=9, color="black")))
 
+            # Transpose: metrics on y-axis (5 rows), sections spread across x-axis
+            # Rendered as raw HTML so the container can scroll horizontally
+            n_sections   = len(hm_data)
+            cell_width   = 80          # px per section column
+            left_margin  = 160         # px for metric labels
+            chart_width  = left_margin + n_sections * cell_width
+            chart_height = 320
+
             fig_hm = go.Figure(go.Heatmap(
-                z=norm.values,
-                x=HM_METRICS,
-                y=list(hm_data.index),
+                z=norm.values.T,                    # transpose → shape (5 metrics, n_sections)
+                x=list(hm_data.index),              # sections on x
+                y=HM_METRICS,                       # metrics on y
                 colorscale="RdYlGn",
                 zmin=0, zmax=1,
                 showscale=True,
-                colorbar=dict(title="Performance", tickvals=[0, 0.5, 1],
-                              ticktext=["Poor", "Average", "Good"]),
+                colorbar=dict(
+                    title="Performance",
+                    tickvals=[0, 0.5, 1],
+                    ticktext=["Poor", "Avg", "Good"],
+                    len=0.8,
+                ),
             ))
+            # Annotations — transposed indices
+            t_anns = []
+            for j, sec in enumerate(hm_data.index):
+                for i, metric in enumerate(HM_METRICS):
+                    val = hm_data.loc[sec, metric]
+                    txt = f"{val:.2f}" if abs(val) < 10 else f"{val:.0f}"
+                    t_anns.append(dict(x=j, y=i, text=txt, showarrow=False,
+                                       font=dict(size=8, color="black")))
             fig_hm.update_layout(
-                xaxis=dict(title="", side="top", tickangle=0),
-                yaxis=dict(title="Site Section", autorange="reversed"),
-                height=max(380, len(hm_data) * 30),
-                margin=dict(t=80, l=10),
-                annotations=anns,
+                xaxis=dict(tickangle=-40, side="bottom", tickfont=dict(size=10)),
+                yaxis=dict(title="", autorange="reversed", tickfont=dict(size=11)),
+                height=chart_height,
+                width=chart_width,
+                margin=dict(t=20, l=10, r=80, b=100),
+                annotations=t_anns,
             )
-            st.plotly_chart(fig_hm, use_container_width=True)
+
+            # Wrap in a scrollable div so it scrolls horizontally on screen
+            chart_html = pio.to_html(fig_hm, full_html=False, include_plotlyjs="cdn",
+                                     config={"displayModeBar": False})
+            scroll_html = f"""
+            <div style="overflow-x:auto; width:100%; border:1px solid #e0e0e0;
+                        border-radius:6px; padding:4px;">
+                {chart_html}
+            </div>"""
+            components.html(scroll_html, height=chart_height + 20, scrolling=False)
             st.caption(
+                "Scroll horizontally to see all sections. "
                 "Green = strong performance; red = areas of concern. "
                 "Sections with red across multiple metrics are highest-priority for content or UX intervention."
             )
@@ -1223,3 +1217,134 @@ with tab3:
     except Exception as e:
         st.error(f"Error in clustering analysis: {e}")
         st.exception(e)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 4 — AI Analyst (full chat interface)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab4:
+    st.header("💬 AI Analyst")
+    st.caption(
+        "Ask questions about the dashboard data in plain English. "
+        "The assistant understands USDA web analytics, Rural Development metrics, and clustering results."
+    )
+
+    if not OPENAI_AVAILABLE:
+        st.error(
+            "The `openai` package is not installed. "
+            "Add `openai` to your `requirements.txt` and redeploy."
+        )
+    else:
+        # ── Credentials (entered once, stored in session state) ────────────────
+        with st.expander("🔑 Configure AI connection", expanded=not st.session_state.oai_key):
+            c1, c2 = st.columns(2)
+            with c1:
+                entered_key = st.text_input(
+                    "OpenAI API Key",
+                    type="password",
+                    value=st.session_state.oai_key,
+                    placeholder="sk-...",
+                    help="Your key is stored only in this browser session and never sent anywhere except OpenAI.",
+                    key="_key_input",
+                )
+            with c2:
+                entered_asst = st.text_input(
+                    "Assistant ID  (optional)",
+                    value=st.session_state.asst_id,
+                    placeholder="asst_…  leave blank to use GPT-4o",
+                    help="Paste your existing ChatGPT Assistant ID here to connect to it directly. Leave blank to use a general GPT-4o session.",
+                    key="_asst_input",
+                )
+            if st.button("Save & connect", type="primary"):
+                st.session_state.oai_key = entered_key.strip()
+                st.session_state.asst_id = entered_asst.strip()
+                st.rerun()
+
+            if st.session_state.oai_key:
+                mode = (
+                    f"Connected to assistant `{st.session_state.asst_id}`"
+                    if st.session_state.asst_id
+                    else "Connected · using GPT-4o"
+                )
+                st.success(f"✅ {mode}")
+            else:
+                st.info("Enter your API key above and click **Save & connect** to start chatting.")
+
+        st.markdown("---")
+
+        if not st.session_state.oai_key:
+            st.warning("Add your OpenAI API key in the configuration panel above to enable the chat.")
+        else:
+            # ── Chat history display ───────────────────────────────────────────
+            for msg in st.session_state.messages:
+                with st.chat_message(msg["role"], avatar="🧑" if msg["role"] == "user" else "🤖"):
+                    st.markdown(msg["content"])
+
+            # ── Chat input ────────────────────────────────────────────────────
+            user_q = st.chat_input("Ask about the USDA data…")
+
+            if user_q:
+                # Show user message immediately
+                st.session_state.messages.append({"role": "user", "content": user_q})
+                with st.chat_message("user", avatar="🧑"):
+                    st.markdown(user_q)
+
+                # Call the API and stream the reply
+                with st.chat_message("assistant", avatar="🤖"):
+                    with st.spinner("Thinking…"):
+                        try:
+                            client = OpenAI(api_key=st.session_state.oai_key)
+
+                            if st.session_state.asst_id:
+                                # ── Assistants API ─────────────────────────────
+                                # Reuse thread across turns if one exists
+                                if "thread_id" not in st.session_state:
+                                    thread = client.beta.threads.create()
+                                    st.session_state.thread_id = thread.id
+
+                                client.beta.threads.messages.create(
+                                    thread_id=st.session_state.thread_id,
+                                    role="user",
+                                    content=user_q,
+                                )
+                                run = client.beta.threads.runs.create_and_poll(
+                                    thread_id=st.session_state.thread_id,
+                                    assistant_id=st.session_state.asst_id,
+                                )
+                                all_msgs = client.beta.threads.messages.list(
+                                    thread_id=st.session_state.thread_id
+                                )
+                                reply = all_msgs.data[0].content[0].text.value
+
+                            else:
+                                # ── Chat Completions API (GPT-4o) ──────────────
+                                api_msgs = [{"role": "system", "content": build_system_prompt()}]
+                                api_msgs += [
+                                    {"role": m["role"], "content": m["content"]}
+                                    for m in st.session_state.messages
+                                ]
+                                resp  = client.chat.completions.create(
+                                    model="gpt-4o",
+                                    messages=api_msgs,
+                                )
+                                reply = resp.choices[0].message.content
+
+                            st.markdown(reply)
+                            st.session_state.messages.append(
+                                {"role": "assistant", "content": reply}
+                            )
+
+                        except Exception as e:
+                            err = f"API error: {e}"
+                            st.error(err)
+                            st.session_state.messages.append(
+                                {"role": "assistant", "content": err}
+                            )
+
+            # ── Clear button ──────────────────────────────────────────────────
+            if st.session_state.messages:
+                if st.button("🗑️ Clear conversation", key="clear_chat"):
+                    st.session_state.messages = []
+                    if "thread_id" in st.session_state:
+                        del st.session_state["thread_id"]
+                    st.rerun()
