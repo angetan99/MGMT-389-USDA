@@ -646,16 +646,21 @@ if page == PAGES[1]:
 
             # Transpose: metrics on y-axis (5 rows), sections spread across x-axis
             # Rendered as raw HTML so the container can scroll horizontally
-            n_sections   = len(hm_data)
-            cell_width   = 80          # px per section column
-            left_margin  = 160         # px for metric labels
-            chart_width  = left_margin + n_sections * cell_width
+            n_sections  = len(hm_data)
+            cell_width  = 80    # px per section column
+            L           = 220   # left margin: colorbar (~55px) + gap + metric labels (~140px)
+            R           = 10    # right margin — kept tight to avoid blank scroll space
+            chart_width = L + n_sections * cell_width + R
             chart_height = 320
 
+            # colorbar x in paper coords = how far left of the plot domain (0) it sits
+            # with margin L out of total width, the plot domain starts at L/chart_width
+            cb_x = -(R + 10) / chart_width  # small negative offset just outside left edge
+
             fig_hm = go.Figure(go.Heatmap(
-                z=norm.values.T,                    # transpose → shape (5 metrics, n_sections)
-                x=list(hm_data.index),              # sections on x
-                y=HM_METRICS,                       # metrics on y
+                z=norm.values.T,          # shape (5 metrics, n_sections)
+                x=list(hm_data.index),    # sections on x-axis
+                y=HM_METRICS,             # metrics on y-axis
                 colorscale="RdYlGn",
                 zmin=0, zmax=1,
                 showscale=True,
@@ -663,13 +668,14 @@ if page == PAGES[1]:
                     title=dict(text="Performance", side="right"),
                     tickvals=[0, 0.5, 1],
                     ticktext=["Poor", "Avg", "Good"],
-                    len=0.8,
-                    x=-0.18,          # place bar to the left of the plot
+                    len=0.75,
+                    thickness=14,
+                    x=cb_x,
                     xanchor="right",
                     ticks="outside",
                 ),
             ))
-            # Annotations — transposed indices
+            # Cell value annotations — transposed indices
             t_anns = []
             for j, sec in enumerate(hm_data.index):
                 for i, metric in enumerate(HM_METRICS):
@@ -685,11 +691,11 @@ if page == PAGES[1]:
                     tickfont=dict(size=11),
                     tickmode="array",
                     tickvals=list(range(len(HM_METRICS))),
-                    ticktext=HM_METRICS,       # explicit metric labels on the left
+                    ticktext=HM_METRICS,
                 ),
                 height=chart_height,
                 width=chart_width,
-                margin=dict(t=20, l=200, r=20, b=110),   # l=200: room for colorbar + metric labels
+                margin=dict(t=20, l=L, r=R, b=110),
                 annotations=t_anns,
             )
 
