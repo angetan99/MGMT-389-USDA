@@ -4,3 +4,6 @@ numpy
 plotly
 scikit-learn
 openpyxl
+streamlit
+openai
+python-dotenv
