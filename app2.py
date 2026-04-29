@@ -660,10 +660,13 @@ if page == PAGES[1]:
                 zmin=0, zmax=1,
                 showscale=True,
                 colorbar=dict(
-                    title="Performance",
+                    title=dict(text="Performance", side="right"),
                     tickvals=[0, 0.5, 1],
                     ticktext=["Poor", "Avg", "Good"],
                     len=0.8,
+                    x=-0.18,          # place bar to the left of the plot
+                    xanchor="right",
+                    ticks="outside",
                 ),
             ))
             # Annotations — transposed indices
@@ -686,7 +689,7 @@ if page == PAGES[1]:
                 ),
                 height=chart_height,
                 width=chart_width,
-                margin=dict(t=20, l=160, r=80, b=110),   # l=160 gives room for metric names
+                margin=dict(t=20, l=200, r=20, b=110),   # l=200: room for colorbar + metric labels
                 annotations=t_anns,
             )
 
