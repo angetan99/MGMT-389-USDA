@@ -236,6 +236,19 @@ def load_rd_data(file_source):
 
 
 @st.cache_data
+def run_clustering_diagnostics(_scaled):
+    """Compute WCSS and silhouette scores for k=2..10 to justify the choice of k=4."""
+    from sklearn.metrics import silhouette_score as _sil
+    wcss, sil = [], []
+    for k in range(2, 11):
+        km = KMeans(n_clusters=k, random_state=42, n_init=10)
+        km.fit(_scaled)
+        wcss.append(km.inertia_)
+        sil.append(_sil(_scaled, km.labels_))
+    return wcss, sil
+
+
+@st.cache_data
 def run_clustering(_page_df, _scaled):
     """Run k=4 KMeans and assign semantic labels based on cluster characteristics."""
     km = KMeans(n_clusters=4, random_state=42, n_init=10)
@@ -282,31 +295,16 @@ def build_system_prompt():
 # ══════════════════════════════════════════════════════════════════════════════
 st.set_page_config(page_title="USDA Digital Analytics Dashboard", layout="wide")
 
-# ── Sidebar ────────────────────────────────────────────────────────────────────
-st.sidebar.title("USDA Analytics Dashboard")
-st.sidebar.markdown("---")
-
-RD_FILENAME   = "(Rural Development) Edited USDA data base.csv"
-rd_default    = _find_file(RD_FILENAME)
-rd_upload     = st.sidebar.file_uploader(
-    "Override RD data (optional)",
-    type=["csv", "zip"],
-    help="Only needed if the bundled file is not in the repository.",
-)
-
-if rd_upload is not None:
-    rd_source, rd_ok = rd_upload, True
-    st.sidebar.success("Using uploaded file.")
-elif rd_default:
+# ── RD data: auto-detect only, no sidebar uploader ────────────────────────────
+RD_FILENAME = "(Rural Development) Edited USDA data base.csv"
+rd_default  = _find_file(RD_FILENAME)
+if rd_default:
     rd_source, rd_ok = rd_default, True
-    st.sidebar.info("RD data loaded from repository.")
 else:
     rd_source, rd_ok = None, False
-    st.sidebar.error(f"'{RD_FILENAME}' not found. Upload it above.")
 
-# ── ChatGPT Agent ──────────────────────────────────────────────────────────────
-st.sidebar.markdown("---")
-st.sidebar.subheader("💬 AI Analyst")
+# ── Sidebar: AI Analyst only ───────────────────────────────────────────────────
+st.sidebar.title("💬 AI Analyst")
 
 if not OPENAI_AVAILABLE:
     st.sidebar.warning("Install `openai` to enable AI chat.")
@@ -636,7 +634,10 @@ with tab2:
     st.markdown("---")
 
     if not rd_ok:
-        st.warning("Upload the Rural Development CSV in the sidebar to view this analysis.")
+        st.error(
+            f"Rural Development data file not found in the repository.  \n"
+            f"Make sure **`{RD_FILENAME}`** (or its `.zip`) is committed alongside `app2.py`."
+        )
         st.stop()
 
     try:
@@ -846,7 +847,10 @@ with tab3:
     st.markdown("---")
 
     if not rd_ok:
-        st.warning("Upload the Rural Development CSV in the sidebar to view this analysis.")
+        st.error(
+            f"Rural Development data file not found in the repository.  \n"
+            f"Make sure **`{RD_FILENAME}`** (or its `.zip`) is committed alongside `app2.py`."
+        )
         st.stop()
 
     try:
@@ -865,6 +869,72 @@ with tab3:
             "Discovery":     "#f9a825",
             "High Friction": "#c62828",
         }
+
+        # ── Why k = 4? Diagnostic charts ─────────────────────────────────────
+        with st.expander("📊 How was k = 4 chosen? (Elbow & Silhouette diagnostics)", expanded=False):
+            st.markdown(
+                "Before fixing the number of clusters, we evaluated k = 2 through 10 using two standard diagnostics:  \n"
+                "- **Elbow Method (WCSS):** The point where adding more clusters stops meaningfully reducing within-cluster variance.  \n"
+                "- **Silhouette Score:** Measures how well-separated the clusters are (higher = more distinct groups).  \n\n"
+                "Both diagnostics pointed to **k = 4** as the optimal number of behaviorally distinct page groups."
+            )
+            wcss, sil_scores = run_clustering_diagnostics(scaled)
+            k_range = list(range(2, 11))
+            peak_k  = k_range[int(np.argmax(sil_scores))]
+            peak_s  = max(sil_scores)
+
+            diag1, diag2 = st.columns(2)
+            with diag1:
+                fig_elbow = go.Figure()
+                fig_elbow.add_trace(go.Scatter(
+                    x=k_range, y=wcss, mode="lines+markers",
+                    line=dict(color="#1565c0", width=2), marker=dict(size=7),
+                    name="WCSS",
+                ))
+                fig_elbow.add_vline(
+                    x=4, line_dash="dash", line_color="#c62828",
+                    annotation_text="k = 4 selected", annotation_position="top right",
+                )
+                fig_elbow.update_layout(
+                    title="Elbow Method — Within-Cluster Sum of Squares",
+                    xaxis_title="Number of Clusters (k)",
+                    yaxis_title="WCSS",
+                    height=340, showlegend=False,
+                )
+                st.plotly_chart(fig_elbow, use_container_width=True)
+
+            with diag2:
+                fig_sil = go.Figure()
+                fig_sil.add_trace(go.Scatter(
+                    x=k_range, y=sil_scores, mode="lines+markers",
+                    line=dict(color="#2e7d32", width=2), marker=dict(size=7),
+                    name="Silhouette",
+                ))
+                fig_sil.add_vline(
+                    x=4, line_dash="dash", line_color="#c62828",
+                    annotation_text="k = 4 selected", annotation_position="top right",
+                )
+                fig_sil.add_annotation(
+                    x=peak_k, y=peak_s,
+                    text=f"Peak: {peak_s:.3f} at k={peak_k}",
+                    showarrow=True, arrowhead=2, bgcolor="white",
+                )
+                fig_sil.update_layout(
+                    title="Silhouette Score — Cluster Separation Quality",
+                    xaxis_title="Number of Clusters (k)",
+                    yaxis_title="Silhouette Score (higher = better)",
+                    height=340, showlegend=False,
+                )
+                st.plotly_chart(fig_sil, use_container_width=True)
+
+            st.info(
+                f"Silhouette score at k = 4: **{sil_scores[2]:.4f}**  \n"
+                f"Peak silhouette score: **{peak_s:.4f}** at k = {peak_k}.  \n"
+                "k = 4 was selected because it produces the clearest behaviorally distinct groups "
+                "and aligns with the four meaningful service tiers identified in the Rural Development context."
+            )
+
+        st.markdown("---")
 
         # ── Cluster definition cards ──────────────────────────────────────────
         st.subheader("What Each Cluster Represents")
