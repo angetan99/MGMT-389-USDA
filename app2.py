@@ -110,7 +110,7 @@ def load_system_data():
     traffic   = read("traffic-source-1-2024.csv")
 
     for df in (device, domain, downloads, language, traffic):
-        df["date"]  = pd.to_datetime(df["date"], dayfirst=False, infer_datetime_format=True)
+        df["date"]  = pd.to_datetime(df["date"], dayfirst=False)
         df["month"] = df["date"].dt.to_period("M").dt.to_timestamp()
 
     return device, domain, downloads, language, traffic
@@ -1122,9 +1122,27 @@ with tab3:
                 "Device Gap Score":   "{:.3f}",
                 "Underserved Score":  "{:.3f}",
             }
-            return df[inv_cols].style.format(
-                {k: v for k, v in fmt.items() if k in inv_cols}
-            ).background_gradient(subset=["Underserved Score"], cmap="RdYlGn_r")
+
+            def _score_color(val):
+                """Red-yellow-green gradient without matplotlib."""
+                try:
+                    mn = filtered["Underserved Score"].min()
+                    mx = filtered["Underserved Score"].max()
+                    t  = (float(val) - mn) / (mx - mn) if mx > mn else 0.5
+                    # t=0 → green, t=1 → red
+                    r = int(255 * t)
+                    g = int(255 * (1 - t))
+                    text = "white" if t > 0.75 else "black"
+                    return f"background-color: rgb({r},{g},30); color: {text}"
+                except Exception:
+                    return ""
+
+            return (
+                df[inv_cols]
+                .style
+                .format({k: v for k, v in fmt.items() if k in inv_cols})
+                .map(_score_color, subset=["Underserved Score"])
+            )
 
         st.dataframe(_fmt_inv(filtered), use_container_width=True, hide_index=True)
         st.caption(
