@@ -14,11 +14,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 
-try:
-    from openai import OpenAI
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
+GPT_URL = "https://chatgpt.com/g/g-69ebb90f6e848191995a9e2ef1b7458f-usda"
 
 # ── Path resolution ────────────────────────────────────────────────────────────
 try:
@@ -280,16 +276,6 @@ def run_clustering(_page_df, _scaled):
     return df
 
 
-# ── OpenAI chat ────────────────────────────────────────────────────────────────
-def build_system_prompt():
-    return (
-        "You are an expert digital analytics consultant embedded in a USDA website analytics dashboard. "
-        "The dashboard covers January–June 2024 system-wide web traffic across all USDA agencies, plus "
-        "detailed Rural Development engagement data. "
-        "You help non-technical USDA decision-makers interpret charts and take action. "
-        "Be concise, specific, and practical. Avoid jargon. "
-        "When asked about a chart or metric, explain what it means for the agency's mission."
-    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -305,34 +291,34 @@ if rd_default:
 else:
     rd_source, rd_ok = None, False
 
-# ── Sidebar: hidden (no content) ──────────────────────────────────────────────
+# ── Sidebar: title + navigation + GPT link ────────────────────────────────────
+st.sidebar.title("USDA Analytics\nDashboard")
+st.sidebar.markdown("---")
+st.sidebar.markdown("**Navigate**")
+
+PAGES = [
+    "📊  System-Wide Analysis",
+    "🌾  Rural Development",
+    "🔬  Clustering & Underserved",
+]
+page = st.sidebar.radio("", PAGES, label_visibility="collapsed")
+
+st.sidebar.markdown("---")
 st.sidebar.markdown(
-    "<style>section[data-testid='stSidebar']{display:none}</style>",
+    f"""<a href="{GPT_URL}" target="_blank"
+        style="display:flex;align-items:center;gap:8px;text-decoration:none;
+               color:inherit;font-weight:600;font-size:0.95em;">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/0/04/ChatGPT_logo.svg"
+             width="22" style="vertical-align:middle;">
+        Ask the AI Analyst
+    </a>""",
     unsafe_allow_html=True,
 )
-
-# Session state for chat
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "oai_key" not in st.session_state:
-    st.session_state.oai_key = ""
-if "asst_id" not in st.session_state:
-    st.session_state.asst_id = ""
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Tabs
-# ══════════════════════════════════════════════════════════════════════════════
-tab1, tab2, tab3, tab4 = st.tabs([
-    "Layer 1 · System-Wide Analysis",
-    "Layer 2 · Rural Development Baseline",
-    "Layer 3 · Clustering & Underserved Analysis",
-    "💬 AI Analyst",
-])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # LAYER 1 — System-Wide Descriptive Analysis
 # ══════════════════════════════════════════════════════════════════════════════
-with tab1:
+if page == PAGES[0]:
     st.header("Layer 1: System-Wide Descriptive Analysis")
     st.caption("What is happening across USDA's web presence? Jan – Jun 2024.")
     st.markdown("---")
@@ -591,7 +577,7 @@ with tab1:
 # ══════════════════════════════════════════════════════════════════════════════
 # LAYER 2 — Rural Development Baseline
 # ══════════════════════════════════════════════════════════════════════════════
-with tab2:
+if page == PAGES[1]:
     st.header("Layer 2: Rural Development Descriptive Foundation")
     st.caption("How is the Rural Development site performing, and for whom is it performing worst?")
     st.markdown("---")
@@ -690,10 +676,17 @@ with tab2:
                                        font=dict(size=8, color="black")))
             fig_hm.update_layout(
                 xaxis=dict(tickangle=-40, side="bottom", tickfont=dict(size=10)),
-                yaxis=dict(title="", autorange="reversed", tickfont=dict(size=11)),
+                yaxis=dict(
+                    title="",
+                    autorange="reversed",
+                    tickfont=dict(size=11),
+                    tickmode="array",
+                    tickvals=list(range(len(HM_METRICS))),
+                    ticktext=HM_METRICS,       # explicit metric labels on the left
+                ),
                 height=chart_height,
                 width=chart_width,
-                margin=dict(t=20, l=10, r=80, b=100),
+                margin=dict(t=20, l=160, r=80, b=110),   # l=160 gives room for metric names
                 annotations=t_anns,
             )
 
@@ -832,7 +825,7 @@ with tab2:
 # ══════════════════════════════════════════════════════════════════════════════
 # LAYER 3 — Clustering & Underserved Analysis
 # ══════════════════════════════════════════════════════════════════════════════
-with tab3:
+if page == PAGES[2]:
     st.header("Layer 3: Page-Level Clustering & Underserved Analysis")
     st.markdown(
         "> **Clustering** asks: *Which pages behave similarly to each other?*  \n"
@@ -1219,132 +1212,3 @@ with tab3:
         st.exception(e)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — AI Analyst (full chat interface)
-# ══════════════════════════════════════════════════════════════════════════════
-with tab4:
-    st.header("💬 AI Analyst")
-    st.caption(
-        "Ask questions about the dashboard data in plain English. "
-        "The assistant understands USDA web analytics, Rural Development metrics, and clustering results."
-    )
-
-    if not OPENAI_AVAILABLE:
-        st.error(
-            "The `openai` package is not installed. "
-            "Add `openai` to your `requirements.txt` and redeploy."
-        )
-    else:
-        # ── Credentials (entered once, stored in session state) ────────────────
-        with st.expander("🔑 Configure AI connection", expanded=not st.session_state.oai_key):
-            c1, c2 = st.columns(2)
-            with c1:
-                entered_key = st.text_input(
-                    "OpenAI API Key",
-                    type="password",
-                    value=st.session_state.oai_key,
-                    placeholder="sk-...",
-                    help="Your key is stored only in this browser session and never sent anywhere except OpenAI.",
-                    key="_key_input",
-                )
-            with c2:
-                entered_asst = st.text_input(
-                    "Assistant ID  (optional)",
-                    value=st.session_state.asst_id,
-                    placeholder="asst_…  leave blank to use GPT-4o",
-                    help="Paste your existing ChatGPT Assistant ID here to connect to it directly. Leave blank to use a general GPT-4o session.",
-                    key="_asst_input",
-                )
-            if st.button("Save & connect", type="primary"):
-                st.session_state.oai_key = entered_key.strip()
-                st.session_state.asst_id = entered_asst.strip()
-                st.rerun()
-
-            if st.session_state.oai_key:
-                mode = (
-                    f"Connected to assistant `{st.session_state.asst_id}`"
-                    if st.session_state.asst_id
-                    else "Connected · using GPT-4o"
-                )
-                st.success(f"✅ {mode}")
-            else:
-                st.info("Enter your API key above and click **Save & connect** to start chatting.")
-
-        st.markdown("---")
-
-        if not st.session_state.oai_key:
-            st.warning("Add your OpenAI API key in the configuration panel above to enable the chat.")
-        else:
-            # ── Chat history display ───────────────────────────────────────────
-            for msg in st.session_state.messages:
-                with st.chat_message(msg["role"], avatar="🧑" if msg["role"] == "user" else "🤖"):
-                    st.markdown(msg["content"])
-
-            # ── Chat input ────────────────────────────────────────────────────
-            user_q = st.chat_input("Ask about the USDA data…")
-
-            if user_q:
-                # Show user message immediately
-                st.session_state.messages.append({"role": "user", "content": user_q})
-                with st.chat_message("user", avatar="🧑"):
-                    st.markdown(user_q)
-
-                # Call the API and stream the reply
-                with st.chat_message("assistant", avatar="🤖"):
-                    with st.spinner("Thinking…"):
-                        try:
-                            client = OpenAI(api_key=st.session_state.oai_key)
-
-                            if st.session_state.asst_id:
-                                # ── Assistants API ─────────────────────────────
-                                # Reuse thread across turns if one exists
-                                if "thread_id" not in st.session_state:
-                                    thread = client.beta.threads.create()
-                                    st.session_state.thread_id = thread.id
-
-                                client.beta.threads.messages.create(
-                                    thread_id=st.session_state.thread_id,
-                                    role="user",
-                                    content=user_q,
-                                )
-                                run = client.beta.threads.runs.create_and_poll(
-                                    thread_id=st.session_state.thread_id,
-                                    assistant_id=st.session_state.asst_id,
-                                )
-                                all_msgs = client.beta.threads.messages.list(
-                                    thread_id=st.session_state.thread_id
-                                )
-                                reply = all_msgs.data[0].content[0].text.value
-
-                            else:
-                                # ── Chat Completions API (GPT-4o) ──────────────
-                                api_msgs = [{"role": "system", "content": build_system_prompt()}]
-                                api_msgs += [
-                                    {"role": m["role"], "content": m["content"]}
-                                    for m in st.session_state.messages
-                                ]
-                                resp  = client.chat.completions.create(
-                                    model="gpt-4o",
-                                    messages=api_msgs,
-                                )
-                                reply = resp.choices[0].message.content
-
-                            st.markdown(reply)
-                            st.session_state.messages.append(
-                                {"role": "assistant", "content": reply}
-                            )
-
-                        except Exception as e:
-                            err = f"API error: {e}"
-                            st.error(err)
-                            st.session_state.messages.append(
-                                {"role": "assistant", "content": err}
-                            )
-
-            # ── Clear button ──────────────────────────────────────────────────
-            if st.session_state.messages:
-                if st.button("🗑️ Clear conversation", key="clear_chat"):
-                    st.session_state.messages = []
-                    if "thread_id" in st.session_state:
-                        del st.session_state["thread_id"]
-                    st.rerun()
